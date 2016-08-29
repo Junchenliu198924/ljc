@@ -1,0 +1,10 @@
+下载git安装包 或者用工具brew （下载网址http://brew.sh/index_zh-cn.html）
+在github上面注册账号https://github.com/
+在github上面创建资源库
+在使用机器生成对应的密钥文件ssh-keygen –t rsa –C “邮箱地址”
+在github上面添加 本机对应目录下面的id_rsa.pub文件内容
+git config –global user.name “用户名”
+git config –global user.email “邮箱
+增加github自己代码库   git remote add origin git@github.com:Junchenliu198924/ljc.git
+同步远程的代码库带本地 git pull  git@github.com:Junchenliu198924/ljc.git
+git  commit -a -m "full commit"    直接提交
