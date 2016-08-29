@@ -1,0 +1,4 @@
+run {
+delete noprompt archivelog until sequence 468262 thread 1 ;
+delete noprompt archivelog until sequence 218065 thread 2 ;
+}

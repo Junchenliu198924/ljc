@@ -1,0 +1,409 @@
+监控用户登入窗口跑的脚本用时sql脚本-------------
+SELECT USERNAME,OSUSER,TIME_REMAINING 余时,ELAPSED_SECONDS 用时,TOT_TIME 总时,
+       D.ACTION_HASH 窗口ID,D.ACTION 窗口名,OPNAME,TARGET,START_TIME,LOGON_TIME 登入时间,
+       WAIT_CLASS,SECONDS_IN_WAIT,
+       D.SQL_ID,SQL_TEXT,SID,SERIAL#
+  FROM V$SQL C,
+      (SELECT A.SID,A.SERIAL#,A.USERNAME,SCHEMANAME,A.OSUSER,
+              TIME_REMAINING,ELAPSED_SECONDS,TIME_REMAINING+ELAPSED_SECONDS TOT_TIME,
+              ACTION_HASH,ACTION,OPNAME,TARGET,START_TIME,LOGON_TIME,MACHINE,PROGRAM,
+              STATUS,STATE,EVENT,WAIT_CLASS,SECONDS_IN_WAIT,
+              ROW_WAIT_OBJ#,ROW_WAIT_FILE#,
+              A.SQL_ID,WAIT_CLASS_ID,WAIT_CLASS#,ROW_WAIT_BLOCK#,FIXED_TABLE_SEQUENCE
+         FROM V$SESSION A
+         LEFT JOIN
+              V$SESSION_LONGOPS B
+           ON A.SID = B.SID
+          AND A.SERIAL#=B.SERIAL#
+        WHERE A.STATUS = 'ACTIVE'
+          AND A.USERNAME IS NOT NULL
+          and a.username not in ('SYS','PUB_SJCJ','DBMONOPR','FOGLIGHT','DBMGR','DBMGR','DBQUA','RISKETL')
+          AND NVL(B.SOFAR,0) <> NVL(B.TOTALWORK,1)) D
+ WHERE D.SQL_ID = C.SQL_ID(+)
+ ORDER BY 余时 DESC,总时 DESC,OSUSER,USERNAME,START_TIME,登入时间;
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 查询等待时间sql语句------------
+ 
+select  /*+ordered*/sw.seq#,sw.sid||','||s.serial# sids,s.username,sw.event,d.event_count,sw.P1,sw.p2,sw.p3,sw.wait_time "WAIT",
+        sw.state,sw.seconds_in_wait sec,s.status,to_char(s.logon_time,'dd/hh24:mi:ss') logon_time,st.sql_text sql_text
+from (select event,event_count from(
+select distinct event,
+       sum(1) over(partition by decode(substr(event,1,5),'latch','latch free',decode(substr(event,1,3),'enq','enqueue',event))) event_count
+from v$session_wait
+where event not like '%SQL*Net%'
+and event not like 'PX Deq%'
+and event not like 'rdbms ipc message'
+and event not like 'queue messages'
+and event not like 'Streams AQ: waiting for messages in the queue')
+where (event like 'latch%' and event_count>10)
+or (event like 'enq%' and event_count>5)
+or (event = 'db file scattered read' and event_count>10)
+or (event = 'db file sequential read' and event_count>30)
+or (event = 'buffer busy waits' and event_count>20)
+or (event not in('db file sequential read','buffer busy waits','db file scattered read')
+    and event not like 'latch%'
+    and event not like 'enq%'
+    and event_count>10)) d,
+v$session_wait sw,v$session s,v$sql st
+where d.event=sw.event
+and sw.sid =s.sid
+and s.sql_address=st.address(+)
+and s.sql_hash_value=st.hash_value(+)
+and st.child_number(+)=0
+order by sw.event,s.username;
+
+
+
+
+
+
+
+查询回滚段的sql语句--------------
+select s.sid,
+       s.serial#,
+       s.machine,
+       s.OSUSER,
+       s.username,
+       s.status,
+       round(s.last_call_et / 60) "IDLE_Min",
+       round((sysdate - to_date(t.start_time, 'mm/dd/yy hh24:mi:ss')) * 24 * 60) "Trans_Min",
+       r.usn,
+       round(r.RSSIZE / 1024 / 1024) rbssize_M,
+       round(r.OPTSIZE / 1024 / 1024) optsize_M,
+       s.logon_time,
+       s.program,
+       q.sql_text,
+       q.hash_value
+  FROM V$session s, V$transaction t, V$rollstat r,v$sqlarea q
+ WHERE s.saddr = t.ses_addr
+   AND t.xidusn = r.usn
+   AND s.sql_address=q.address
+   AND s.sql_hash_value=q.hash_value
+   AND ((((r.curext = t.start_uext - 1) OR
+       ((r.curext = r.extents - 1) AND t.start_uext = 0))
+   and s.last_call_et /60 > 30
+   and r.rssize>r.optsize
+   and r.rssize > 50*1024*1024)
+    or r.rssize >100*1024*1024)
+ order by last_call_et desc;
+ ----------dba版
+ select sw.inst_id,s.sid, s.sql_hash_value,s.osuser,to_char(s.LOGON_TIME,'YYYY-MM-DD HH24:MI:SS') logontime,sw.event, s.username, t.xidusn, round(t.used_ublk * 8 / 1024 ,1)used_undo
+  from gv$transaction t, gv$session s,gv$session_wait sw
+where t.ADDR = s.TADDR
+   and t.INST_ID = s.INST_ID
+   and s.inst_id=sw.inst_id
+   and s.sid=sw.sid
+   --and s.sid=& 
+   --and s.hash_value=&1
+   order by  t.used_ublk * 8 / 1024 desc;
+
+
+
+-----------------------
+查看表空间使用情况
+
+select df.tablespace_name "表空间名",
+       totalspace "总空间G",
+       freespace "剩余空间G",
+       round((1 - freespace / totalspace) * 100, 2) "使用率%"
+  from (select tablespace_name, round(sum(bytes) / 1024 / 1024/1024) totalspace
+          from dba_data_files
+         group by tablespace_name) df,
+       (select tablespace_name, round(sum(bytes) / 1024 / 1024/1024) freespace
+          from dba_free_space
+         group by tablespace_name) fs
+ where df.tablespace_name = fs.tablespace_name;
+ 
+ 
+ 
+ --------------------------------------
+ select ww.sid,bb.SQL_TEXT,bb.*,ww.*  from v$session   ww ,v$sqlarea  bb where lower(ww.USERNAME)='riskjob'and bb.SQL_ID=ww.SQL_ID     ;
+
+
+-----------------------------------
+查看session中有i/o比较高的会话
+
+select * from v$session where event='db file sequential read';
+ 
+ 
+ 
+ 
+-------------------------调度程序
+/*RISKJOB: scan, switch, chk*/
+  declare
+    p_errcode integer;
+    p_errmsg  varchar2(4000);
+  begin
+    pkg_control.p_ready_scan(p_errcode, p_errmsg);
+    pkg_control.p_batch_date_switch;
+    pkg_control.p_batch_date_chk;
+  end;
+/*RISKJOB: scheduler*/
+declare
+  p_errcode integer;
+  p_errmsg  varchar2(4000);
+begin
+  pkg_control.p_scheduler(p_errcode, p_errmsg);
+end;
+
+--查指定session占用回滚段大小
+select s.USERNAME,s.SID,s.SERIAL#, round(r.RSSIZE / 1024 / 1024) rbssize_M,
+       round(r.OPTSIZE / 1024 / 1024) optsize_M,
+       s.logon_time,
+       s.program,
+       q.sql_text,
+       q.hash_value
+  FROM V$session s, V$transaction t, V$rollstat r,v$sqlarea q
+ WHERE s.saddr = t.ses_addr
+   AND t.xidusn = r.usn
+   AND s.sql_address=q.address
+   AND s.sql_hash_value=q.hash_value
+   and s.SID='684'
+--查session详细信息   
+   select * from v$session a where a.SID='684'   
+--查指定session产生的锁信息
+   select * from v$lock where sid='684'
+--查指定session锁住的对象信息
+   select * from v$locked_object  b where b.SESSION_ID='684'
+------------------------------------------------------------------------------------------------------------- 
+
+
+
+
+关于时间增加的监控sql脚本：
+.select to_date('02-22-2008 10:30:30','mm-dd-yyyy hh24:mi:ss') today, 
+to_date('02-22-2008 10:30:30','mm-dd-yyyy hh24:mi:ss')+1 next_day 
+from dual;
+TODAY  NEXT_DAY
+------------------------- -------------------------
+02-22-08 10:30:30 02-23-08 10:30:30
+2.Add an hour.
+select to_date('02-22-08 10:30:30','mm-dd-yy hh24:mi:ss') today,
+to_date('02-22-08 10:30:30','mm-dd-yy hh24:mi:ss')+ 1/24 next_hour
+from dual;
+TODAY  NEXT_HOUR
+------------------------ ------------------------
+02-22-08 10:30:30 02-22-08 11:30:30
+3.Add a minute.
+select to_date('02-22-08 10:30:30','mm-dd-yy hh24:mi:ss') today,
+to_date('02-22-08 10:30:30','mm-dd-yy hh24:mi:ss')+ 1/(24*60) next_min
+from dual;
+TODAY  NEXT_MIN
+------------------------ ------------------------
+02-22-08 10:30:30 02-22-08 10:31:30
+4.Add a second.
+select to_date('02-22-08 10:30:30','mm-dd-yy hh24:mi:ss') today,
+to_date('02-22-08 10:30:30','mm-dd-yy hh24:mi:ss')+ 1/(24*60*60) next_sec
+from dual;
+TODAY  NEXT_SEC
+------------------------ --------------------------------------------------------------------------------
+
+
+--看哪些角色授给了这些用户
+select * from dba_role_privs p where p.grantee in ('DEVSUP03','DEVSUP01','DEVSUP02')
+
+R_RISKBASE_QRY
+R_RISKDATA_QRY
+CREATE SESSION
+
+--看哪些表授给了这些用户
+select * from dba_tab_privs b where b.grantee  in ('DEVSUP03','DEVSUP01','DEVSUP02')
+
+--看哪些系统权限授给了这些用户
+select * from dba_sys_privs sp where sp.grantee  in ('DEVSUP03','DEVSUP01','DEVSUP02')
+
+--查用户的审计记录
+select * from DBA_AUDIT_TRAIL t where t.username='DEVSUP01' 
+----------查看sql 的效率值
+select a.HASH_VALUE,a.PLAN_HASH_VALUE,a.BUFFER_GETS/a.EXECUTIONS,a.ELAPSED_TIME/a.EXECUTIONS,a.CPU_TIME/a.EXECUTIONS
+,a.EXECUTIONS,a.DISK_READS/a.EXECUTIONS from v$sql a where a.HASH_VALUE in ('2638120379' ,'2276477893')-
+
+---------在命令窗口查看command命令
+ select   id ,lpad(' ',2*(level-1))||operation||' '||options||' '||object_name||' '||decode(id,0,'Cost='||cost)"query plan table"   from 
+    v$sql_plan 
+    start  with id=0
+      and sql_id='8u4rwdndc400q' and plan_hash_value=3974877986 
+    connect by prior id =parent_id  and sql_id='8u4rwdndc400q'  and plan_hash_value='3974877986';
+    
+    
+    select a.PLAN_HASH_VALUE,b.SQL_ID,a.SQL_TEXT ,b.INST_ID   from  gv$sql a   , gv$session b    where   a.SQL_ID=b.SQL_ID  and  b.USERNAME='LDPPJOB'
+
+ 
+---------查看一句sql的hash_value
+
+select * from v$sql t where  t.SQL_TEXT like '%test_yanlz%'   （下面回复给开发中标红的，标记字眼）
+
+ 
+
+ 
+
+---------确定HASH VALUE后查询SQL资源消耗,对比前后两句性能比较
+
+ 
+
+select a.HASH_VALUE,a.PLAN_HASH_VALUE,a.BUFFER_GETS/a.EXECUTIONS,a.ELAPSED_TIME/a.EXECUTIONS,a.CPU_TIME/a.EXECUTIONS
+
+,a.EXECUTIONS,a.DISK_READS/a.EXECUTIONS from v$sql a where a.HASH_VALUE in ('2638120379' ,'2276477893')-----调整前后两SQL HASH值。
+
+------------效率测试脚本
+DECLARE
+  NUM1 NUMBER(10) := 0;
+  CURSOR T IS
+    SELECT TRADE_SEQ, CARD_NBR
+      FROM TDS_T_TRADE_FOR_FRAUD
+     WHERE TRADE_INSERT_TIME > TO_DATE('2012-9-8 13:43:00', 'yyyy-mm-dd hh24:mi:ss')
+       AND TRADE_INSERT_TIME < TO_DATE('2012-9-8 13:53:00', 'yyyy-mm-dd hh24:mi:ss');
+/**
+
+测试1 8269    2012-9-7 13:43:00  到  2012-9-7 13:53:00  交易7429笔，使用时间是：+000000000 00:01:21.720082000
+
+**/       
+  T1    TIMESTAMP;
+  T2    TIMESTAMP;
+  T3    TIMESTAMP;
+  T4    TIMESTAMP;
+  V_NUM NUMBER(10) := 0;
+  v_count  NUMBER (10);
+BEGIN
+  T3 := SYSTIMESTAMP;
+  FOR VA IN T LOOP
+    NUM1  := 0;
+    V_NUM := V_NUM + 1;
+    T1    := SYSTIMESTAMP;
+  
+    SELECT COUNT(*) INTO  v_count  
+      FROM (脚本);
+               
+    T2 := SYSTIMESTAMP;
+  
+  dbms_output.put_line('交易'||VA.trade_seq||'使用时间:' ||(t2-t1));
+  
+  END LOOP;
+  T4 := SYSTIMESTAMP;
+  DBMS_OUTPUT.PUT_LINE('交易' || V_NUM || '笔，使用时间是：' || (T4 - T3));
+END;
+
+-------------------批量检查对应条数的脚本
+DECLARE
+     NUM1  varchar2(100);
+     sql_name  varchar2(300);
+          sql_name2  varchar2(300);
+
+     n1 varchar2(50);
+
+BEGIN
+
+ for cur in (select * from TMP_NAME t )  loop
+
+    NUM1  := cur.name; 
+    sql_name   := 'select   count(*)    from  '   || NUM1 ;
+
+execute   immediate (sql_name)  into  n1;
+        sql_name2   := 'update  tmp_name  set count1='|| n1||'  where  name = '''||NUM1||'''' ;
+        execute   immediate (sql_name2)  ;
+        commit;
+ dbms_output.put_line(sql_name2);
+
+ dbms_output.put_line(n1);
+
+  
+  END LOOP;
+ 
+END;
+
+
+
+------数据库大操作监控脚本
+
+select f.TIME_REMAINING 估计剩余时间S,
+       s.sid,
+       s.sql_hash_value,
+       to_char(s.LOGON_TIME, 'YYYY-MM-DD HH24:MI:SS') logontime,
+       sw.event,
+       s.username,
+       t.xidusn,
+       round(t.used_ublk * 8 / 1024, 1) used_undoM
+  from gv$transaction    t,
+       gv$session        s,
+       gv$session_wait   sw,
+       V$SESSION_LONGOPS f
+where t.ADDR = s.TADDR
+   and t.INST_ID = s.INST_ID
+   and s.inst_id = sw.inst_id
+   and f.SID = s.SID
+   and s.sid = sw.sid /*and  s.sid in (17,1715)*/
+   and f.TIME_REMAINING <> 0
+order by t.used_ublk * 8 / 1024 desc;
+
+------用sid查找操作系统上的进程号
+select b.PID, b.*  from v$process  b     where   b.ADDR = (select   paddr  from v$session where   sid =  :1  ) ;
+                                                  
+                                                  
+                                                  
+-----spool打印对应出文件
+set heading off
+set echo off
+set term off
+set feed off
+set pages 0
+set line 700
+spool D:\资料保存目录\mis_app_tel_2011.TXT
+select r.application_no || ',' ||
+       HOME_PHONE_NO_MAIN || ',' ||
+       COMPANY_PHONE_MAIN || ',' ||
+       LINEAL_RELATIVE_PHONE_MAIN || ',' ||
+       NON_SUPPLE_RELATIVE_PHONE_MAIN || ',' ||
+       MOBILE_PHONE_NO_MAIN || ',' ||
+       LINEAL_RELATIVE_MP_MAIN || ',' ||
+       NON_SUPPLE_RELATIVE_MP_MAIN || ',' 
+  from tmp_cps_app_application r
+ where r.lcd >= to_date('20140425', 'yyyymmdd')
+ and r.lcd <= to_date('20140425','yyyymmdd');
+spool off
+set heading on
+set echo on
+set term on
+set feed on
+quit;
+                                   
+                                                  
+------------------------检查对应的ddl 锁对象
+  select * from    DBA_DML_LOCKS   a  where  a.owner='RISKDATA' ;
+  select  * from dba_ddl_locks  b  where  b.owner='RISKDATA';                                  
+                                                  
+                                                  
+                                                  
+                                                  
+                                                  
+ --------------------------检查 archive数据库 可以删除的redo log
+ select a.sequence#,
+       round((a.blocks * a.block_size) / 1024) log_kb,
+       case when thread#=2 then 'ARCHLOG2_SEQ_' else 'ARCHLOG_SEQ_' end ||a.sequence#||'.log' ,thread#
+  from v$archived_log a
+ where a.applied='YES'
+   and a.resetlogs_time >= (select resetlogs_time from v$database)
+   and a.deleted = 'NO'
+   and a.standby_dest='NO'
+   order by a.first_time;
+
+
+
+------------------------检查生产库 可以删除的archive redolog
+select a.sequence# ,
+        round((a.blocks * a.block_size) / 1024) log_kb,
+        case when thread#=2 then 'ARCHLOG2_SEQ_' else 'ARCHLOG_SEQ_' end || a.sequence# || '.log' ,thread#
+   from v$archived_log a,
+        v$archive_dest c
+  where 
+     a.DEST_ID = c.DEST_ID
+    and c.STATUS = 'VALID'
+    and c.TARGET = 'PRIMARY'
+    and a.resetlogs_time >= (select resetlogs_time from v$database)
+    and a.deleted = 'NO'
+  order by a.first_time;                                                 

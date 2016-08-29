@@ -1,0 +1,215 @@
+
+  CREATE OR REPLACE FORCE VIEW "DBMONOPR"."VW_RUBBISH_SQL_LHR" ("SID", "SERIAL#", "SPID", "OSUSER", "USERNAME", "SQL_TEXT", "SQL_FULLTEXT", "PLAN_OPERATION", "PLAN_PARTITION_START", "PLAN_PARTITION_STOP", "SQL_ID", "SQL_EXEC_START", "LOGON_TIME", "ELAPSED_TIME", "SQL_PLAN", "MONITOR_TYPES") AS 
+  SELECT a.SID,
+       c.SERIAL#,
+       (SELECT pr.SPID FROM v$process pr WHERE c.PADDR = pr.ADDR) SPID,
+       c.OSUSER,
+       c.USERNAME,
+       (SELECT b.SQL_TEXT FROM V$SQLAREA b WHERE b.SQL_ID = a.SQL_ID) SQL_TEXT,
+       (SELECT b.SQL_FULLTEXT FROM V$SQLAREA b WHERE b.SQL_ID = a.SQL_ID) SQL_FULLTEXT,
+       a.PLAN_OPERATION || ' ' || a.PLAN_OPTIONS PLAN_OPERATION,
+       a.PLAN_PARTITION_START,
+       a.PLAN_PARTITION_STOP,
+       a.SQL_ID,
+       a.SQL_EXEC_START,
+       c.LOGON_TIME,
+       riskdw.pkg_utility_lhr.fun_get_total_time_lhr(d.ELAPSED_TIME / 1000000) ELAPSED_TIME,
+        'SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY_CURSOR(''' || a.SQL_ID ||
+       ''',' || 0 || ',''advanced''));' sql_plan,
+       '笛卡尔积监控' monitor_types
+FROM   v$sql_plan_monitor a,
+       v$session          c,
+       V$SQL_MONITOR      d
+WHERE  a.PLAN_OPERATION = 'MERGE JOIN'
+AND    a.PLAN_OPTIONS = 'CARTESIAN'
+AND    a.SID = c.SID
+AND    c.STATUS = 'ACTIVE'
+AND    a.STATUS = 'EXECUTING'
+AND    d.STATUS = 'EXECUTING'
+AND    a.SID = d.SID
+AND    a.KEY = d.KEY
+AND    a.SQL_EXEC_ID = d.SQL_EXEC_ID
+and c.USERNAME not in('SYS')
+UNION ALL
+
+------------------------------------------ sql 执行时间超过5小时
+SELECT a.SID,
+       c.SERIAL#,
+       (SELECT pr.SPID FROM v$process pr WHERE c.PADDR = pr.ADDR) SPID,
+       c.OSUSER,
+       c.USERNAME,
+       a.SQL_TEXT SQL_TEXT,
+       (SELECT b.SQL_FULLTEXT FROM V$SQLAREA b WHERE b.SQL_ID = a.SQL_ID) SQL_FULLTEXT,
+       '',
+       '',
+       '',
+       a.SQL_ID,
+       a.SQL_EXEC_START,
+       c.LOGON_TIME,
+       riskdw.pkg_utility_lhr.fun_get_total_time_lhr(a.ELAPSED_TIME / 1000000) ELAPSED_TIME,
+        'SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY_CURSOR(''' || a.SQL_ID ||
+       ''',' || 0 || ',''advanced''));' sql_plan,
+       '执行时间超过5小时' monitor_types
+FROM   V$SQL_MONITOR a,
+       v$session     c
+WHERE  a.SQL_EXEC_ID = c.SQL_EXEC_ID
+AND    a.SID = c.SID
+AND    c.STATUS = 'ACTIVE'
+AND    a.STATUS = 'EXECUTING'
+AND    a.ELAPSED_TIME > 18000000000
+
+UNION ALL
+
+------------------------------------------ 分区表全分区扫描
+
+SELECT a.SID,
+       c.SERIAL#,
+       (SELECT pr.SPID FROM v$process pr WHERE c.PADDR = pr.ADDR) SPID,
+       c.OSUSER,
+       c.USERNAME,
+       b.SQL_TEXT SQL_TEXT,
+       (SELECT nb.SQL_FULLTEXT FROM V$SQLAREA nb WHERE nb.SQL_ID = b.SQL_ID) SQL_FULLTEXT,
+       a.PLAN_OPERATION || ' ' || a.PLAN_OPTIONS PLAN_OPERATION,
+       a.PLAN_PARTITION_START,
+       a.PLAN_PARTITION_STOP,
+       a.SQL_ID,
+       a.SQL_EXEC_START,
+       c.LOGON_TIME,
+       riskdw.pkg_utility_lhr.fun_get_total_time_lhr(b.ELAPSED_TIME / 1000000) ELAPSED_TIME,
+        'SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY_CURSOR(''' || a.SQL_ID ||
+       ''',' || 0 || ',''advanced''));' sql_plan,
+       '分区表全分区扫描' monitor_types
+FROM   v$sql_plan_monitor a,
+       v$sql_monitor      b,
+       v$session          c
+WHERE  a.PLAN_OPERATION LIKE 'PARTITION%'
+AND    a.PLAN_OPTIONS = 'ALL'
+AND    a.SID = b.SID
+AND    a.KEY = b.KEY
+AND    a.SQL_EXEC_ID = b.SQL_EXEC_ID
+AND    a.SQL_ID = b.SQL_ID
+AND    a.SID = c.SID(+)
+AND    a.STATUS = 'EXECUTING'
+
+
+UNION ALL
+
+------------------------------------------ 执行计划中cost花费或者预估行数超大
+
+SELECT a.SID,
+       c.SERIAL#,
+       (SELECT pr.SPID FROM v$process pr WHERE c.PADDR = pr.ADDR) SPID,
+       c.OSUSER,
+       c.USERNAME,
+       b.SQL_TEXT SQL_TEXT,
+       (SELECT nb.SQL_FULLTEXT FROM V$SQLAREA nb WHERE nb.SQL_ID = b.SQL_ID) SQL_FULLTEXT,
+       a.PLAN_OPERATION || ' ' || a.PLAN_OPTIONS PLAN_OPERATION,
+       a.PLAN_PARTITION_START,
+       a.PLAN_PARTITION_STOP,
+       a.SQL_ID,
+       a.SQL_EXEC_START,
+       c.LOGON_TIME,
+       riskdw.pkg_utility_lhr.fun_get_total_time_lhr(b.ELAPSED_TIME / 1000000) ELAPSED_TIME,
+        'SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY_CURSOR(''' || a.SQL_ID ||
+       ''',' || 0 || ',''advanced''));' sql_plan,
+       '执行计划中cost花费或者预估行数超大' monitor_types
+FROM   v$sql_plan_monitor a,
+       v$sql_monitor      b,
+       v$session          c
+WHERE   a.SID = b.SID
+AND    a.KEY = b.KEY
+AND    a.SQL_EXEC_ID = b.SQL_EXEC_ID
+AND    a.SQL_ID = b.SQL_ID
+AND    a.SID = c.SID(+)
+AND    a.STATUS = 'EXECUTING'
+and  (a.PLAN_COST >=3107523095    or a.PLAN_CARDINALITY>30748908521460)
+
+
+ORDER  BY SQL_EXEC_START DESC ,sid,SERIAL#
+
+
+
+
+
+---收集统计信息脚本
+
+
+
+  CREATE OR REPLACE FORCE VIEW "DBMONOPR"."V_NM_TABLE_NUM0_LHR" ("OWNER", "TABLE_NAME", "PARTITION_NAME", "TABLESPACE_NAME", "LOGGING", "LAST_ANALYZED", "SIZES", "IN_DATE", "SEGMENT_CREATED") AS 
+  SELECT D.owner,
+       D.table_name,
+       '' partition_name,
+       D.tablespace_name,
+       D.logging,
+       D.last_analyzed,
+       b.sizes,
+       SYSDATE in_date,
+       D.segment_created
+FROM   dba_tables d,
+       (SELECT NB.owner,
+               NB.segment_name,
+               SUM(NB.BYTES) / 1024 / 1024 SIZES
+        FROM   DBA_SEGMENTS NB
+        WHERE  NB.partition_name IS NULL
+        AND    nb.segment_type = 'TABLE'
+        AND    nb.owner NOT IN ('SYS',
+                                'SYSTEM')
+        AND    nb.tablespace_name NOT IN
+               ('SYSTEM',
+                 'SYSAUX')
+        AND    nb.BYTES / nb.initial_extent > 1.1
+        GROUP  BY NB.owner,
+                  NB.segment_name) B
+WHERE  B.segment_name = D.table_name
+AND    D.owner = B.owner
+AND    d.partitioned = 'NO'
+AND    D.owner NOT IN ('SYS',
+                       'SYSTEM')
+AND    D.tablespace_name NOT IN ('SYSTEM',
+                                 'SYSAUX')
+AND    D.num_rows = 0
+AND    B.SIZES > 10
+and d.table_name not like '%TMP%' and  d.table_name NOT like '%TEMP%'
+and d.table_name not in  ('RKOT_CPP_CDM_APPLICATION','RKOT_EBK_CLIENT_TXN_LOG','RKOT_CPP_LBS_POL_INFO','RKOT_DATA_T_DD_DD_FY_IN_DTL','RKOT_IVR_CALL_LOG','RKOT_CPS_CF_MAIN','RKOT_CPP_ACL_APPLICATION','T_QP_FRDTRD_DRV_2','RKOT_CPP_PRE_AUDIT_MARK','RKOT_CPP_LBS_PRESERVATION','RKOT_TDS_TRADE','RKOT_TDS_EVENT_POOL','RKOT_CSI_EXCEPTION_LOG','RKOT_TDS_M_R_MATCH_RES','RKOT_IN_COMMON_POSTINGF_TASK','RKOT_CDM_MARK_BAK','RKOT_CPP_PREQUERY_LBS_P','RKOT_CUP_TRANSFER_TRANS_DET','RKOT_MPS_SMS_DETAIL_BAK','RKOT_HAPS_STORE_INFO','RKOT_TDS_EVE_PROC_LOG','RKOT_CPS_APP_APPLICATION_ADV')
+
+UNION      ALL
+
+------------------------------------------------------------  分区表
+
+SELECT D.Table_Owner,
+       D.table_name,
+       d.partition_name,
+       D.tablespace_name,
+       D.logging,
+       D.last_analyzed,
+       b.sizes,
+       SYSDATE,
+       D.segment_created
+FROM   DBA_TAB_PARTITIONS d,
+       (SELECT NB.owner,
+               NB.segment_name,
+               nb.partition_name,
+               SUM(NB.BYTES) / 1024 / 1024 SIZES
+        FROM   DBA_SEGMENTS NB
+        WHERE  NB.partition_name IS NOT NULL
+        AND    NB.owner NOT IN ('SYS',
+                                'SYSTEM')
+        AND    NB.tablespace_name NOT IN
+               ('SYSTEM',
+                 'SYSAUX')
+        AND    nb.BYTES / nb.initial_extent > 2
+        GROUP  BY NB.owner,
+                  NB.segment_name,
+                  nb.partition_name) B
+WHERE  B.segment_name = D.table_name
+AND    D.Table_Owner = B.owner
+AND    d.partition_name = b.partition_name
+AND    D.TABLE_OWNER NOT IN ('SYS',
+                             'SYSTEM')
+AND    D.tablespace_name NOT IN ('SYSTEM',
+                                 'SYSAUX')
+AND    D.num_rows = 0
+AND    B.SIZES > 10
+and d.table_name not like '%TMP%' and  d.table_name NOT like '%TEMP%'
+
+and d.table_name not in  ('RKOT_CPP_CDM_APPLICATION','RKOT_EBK_CLIENT_TXN_LOG','RKOT_CPP_LBS_POL_INFO','RKOT_DATA_T_DD_DD_FY_IN_DTL','RKOT_IVR_CALL_LOG','RKOT_CPS_CF_MAIN','RKOT_CPP_ACL_APPLICATION','T_QP_FRDTRD_DRV_2','RKOT_CPP_PRE_AUDIT_MARK','RKOT_CPP_LBS_PRESERVATION','RKOT_TDS_TRADE','RKOT_TDS_EVENT_POOL','RKOT_CSI_EXCEPTION_LOG','RKOT_TDS_M_R_MATCH_RES','RKOT_IN_COMMON_POSTINGF_TASK','RKOT_CDM_MARK_BAK','RKOT_CPP_PREQUERY_LBS_P','RKOT_CUP_TRANSFER_TRANS_DET','RKOT_MPS_SMS_DETAIL_BAK','RKOT_HAPS_STORE_INFO','RKOT_TDS_EVE_PROC_LOG','RKOT_CPS_APP_APPLICATION_ADV')

@@ -1,0 +1,55 @@
+
+------test code ----------------------------------------------------------------------------------------
+
+-----month_auto_task.sh---主执行脚本
+
+#!/bin/bash
+####创建自动月初导组需要的目录
+mkdir -p $HOME/task_month/sql_text  $HOME/task_month/log
+today=$(date '+%Y%m%d')
+touch     $HOME/task_month/log/task_month_${today}.log
+log_name="task_month_${today}.log"
+echo  $log_name 
+###连接数据库执行月任务
+sqlplus /nolog @$HOME/task_month/main.sql $log_name
+echo 'task-end!' >>$HOME/task_month/log/$log_name
+
+
+
+
+-----main.sql----连接数据库执行脚本-----------------------------------------------------------------------------
+
+enmoedu1*PROD1 task_month $ cat main.sql 
+connect   / as  sysdba
+set serveroutput on
+SET FEEDBACK OFF
+spool    $HOME/task_month/log/&1
+@$HOME/task_month/sql_text/2.sql
+@$HOME/task_month/sql_text/3.sql
+spool off;
+exit ; 
+enmoedu1*PROD1 task_month $ cat month_auto_task.sh 
+
+
+--------测试的月任务脚本模板----------------------------------------------------------------------------------------------
+
+enmoedu1*PROD1 task_month $ cat sql_text/
+2.sql  3.sql  
+enmoedu1*PROD1 task_month $ cat sql_text/2.sql 
+declare
+  idno     number;
+  grpname  varchar2(200);
+  sendtype varchar2(1);
+  cuscnt   number;
+begin
+  dbms_output.put_line('task-begin-'||to_char(sysdate,'yyyymmdd')); 
+  grpname  := '非活期宝直销固定收益类客户等于0除养付厦辽';  
+  dbms_output.put_line('基金帐号数: ' || grpname) ;
+  select    to_char(trunc(sysdate),'yyyymmdd')||'_'||grpname  into   grpname from dual ; 
+  dbms_output.put_line(grpname);
+
+end;
+/
+ 
+enmoedu1*PROD1 task_month $ 
+

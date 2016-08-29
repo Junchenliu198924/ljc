@@ -1,0 +1,2 @@
+FRA_SIZE  838860800
+FRA_USAGE                             71

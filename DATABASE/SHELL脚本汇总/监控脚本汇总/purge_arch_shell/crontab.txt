@@ -1,0 +1,1 @@
+2,7,12,17,22,27,32,37,42,47,52,57 * * * * /home/oracle/purge_arch_shell/purge_arch_log.sh >>/home/oracle/purge_arch_shell/purge_arch_log.log 2>>/home/oracle/purge_arch_shell/purge_arch_log.err

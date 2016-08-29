@@ -1,0 +1,5 @@
+Oracle Database 11g Enterprise Edition Release 11.2.0.4.0 - 64bit Production
+PL/SQL Release 11.2.0.4.0 - Production
+CORE	11.2.0.4.0	Production
+TNS for IBM/AIX RISC System/6000: Version 11.2.0.4.0 - Production
+NLSRTL Version 11.2.0.4.0 - Production

@@ -1,0 +1,2 @@
+db_recovery_file_dest                string      /archive
+db_recovery_file_dest_size           big integer 200G

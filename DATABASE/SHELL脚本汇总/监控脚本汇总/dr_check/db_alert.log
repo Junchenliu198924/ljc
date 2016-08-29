@@ -1,0 +1,10 @@
+RFS[10]: Possible network disconnect with primary database
+Thu Dec  4 15:10:17 2014
+RFS[7]: Possible network disconnect with primary database
+Wed Dec 10 09:30:01 2014
+Expanded controlfile section 28 from 282 to 564 records
+Requested to grow by 282 records; added 2 blocks of records
+Expanded controlfile section 28 from 564 to 1128 records
+Requested to grow by 564 records; added 3 blocks of records
+Expanded controlfile section 28 from 1128 to 2256 records
+Requested to grow by 1128 records; added 8 blocks of records

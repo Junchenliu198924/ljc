@@ -1,2 +1,2 @@
 # ljc
-this my work space!
+#code for JAVA  
